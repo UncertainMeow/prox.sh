@@ -1,2 +1,4 @@
 # Ignore the .env file to prevent it from being tracked by Git
 .env
+t-ubu.sh
+cp-ubu.sh
