@@ -1,67 +1,74 @@
 #!/bin/bash
 
-# Template Creation Script for Proxmox
+# Proxmox Ubuntu Template Creation Script
+# Creates an Ubuntu cloud-init template on Proxmox VE.
 
-# Load environment variables from .env
-if [ -f .env ]; then
-  source .env
-else
-  echo "Error: .env file not found. Please create one with CLOUD_USER and CLOUD_PASSWORD."
-  exit 1
-fi
+set -e
 
-# Verify credentials are loaded
-if [ -z "$CLOUD_USER" ] || [ -z "$CLOUD_PASSWORD" ]; then
-  echo "Error: CLOUD_USER and CLOUD_PASSWORD must be set in .env file."
-  exit 1
-fi
+# Enable logging for debugging
+LOG_FILE="/var/log/t-ubu.log"
+exec > >(tee -i "$LOG_FILE") 2>&1
 
-# Define default variables
+# Default Variables
 TEMPLATE_ID=9000
-TEMPLATE_NAME="ubuntu-cloud-template"
-STORAGE="local-lvm"
-BRIDGE="vmbr0"
+TEMPLATE_NAME="ubuntu-cloudinit-template"
 MEMORY=2048
 CORES=2
-DISK_SIZE="10G"
+BRIDGE="vmbr0"
+STORAGE="local-lvm"
+IMAGE_URL="https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+IMAGE_PATH="/var/lib/vz/template/iso/jammy-server-cloudimg-amd64.img"
 
-# Parse arguments
-while getopts "ih?" opt; do
-  case $opt in
-    i)
-      read -p "Enter Template VM ID [${TEMPLATE_ID}]: " TEMPLATE_ID
-      read -p "Enter Template Name [${TEMPLATE_NAME}]: " TEMPLATE_NAME
-      read -p "Enter Storage [${STORAGE}]: " STORAGE
-      read -p "Enter Network Bridge [${BRIDGE}]: " BRIDGE
-      read -p "Enter Memory Size (MB) [${MEMORY}]: " MEMORY
-      read -p "Enter Number of CPU Cores [${CORES}]: " CORES
-      read -p "Enter Disk Size (e.g., 10G) [${DISK_SIZE}]: " DISK_SIZE
-      ;;
-    h)
-      echo "Usage: $0 [-i (interactive)] [-h (help)] [-? (man page)]"
-      exit 0
-      ;;
-    ?)
-      cat <<EOF
-NAME
-    t-ubu.sh - Create an Ubuntu cloud-init template in Proxmox.
+# Helper Function: Check if a VM ID exists
+vm_exists() {
+    qm list | awk '{print $1}' | grep -q "^$1$"
+}
 
-SYNOPSIS
-    t-ubu.sh [OPTIONS]
+# Function: Create Template
+create_template() {
+    # Download the cloud-init image if it doesn't already exist
+    if [ ! -f "$IMAGE_PATH" ]; then
+        echo "Downloading Ubuntu cloud-init image..."
+        wget -O "$IMAGE_PATH" "$IMAGE_URL"
+    else
+        echo "Ubuntu cloud-init image already exists: $IMAGE_PATH"
+    fi
 
-OPTIONS
-    -i      Interactive mode for setting custom values.
-    -h      Display help message.
-    -?      Display detailed man page.
+    # Check if the VM ID is already in use
+    if vm_exists "$TEMPLATE_ID"; then
+        echo "Error: VM ID $TEMPLATE_ID already exists. Please choose a different ID."
+        exit 1
+    fi
 
-DESCRIPTION
-    This script creates a cloud-init enabled Ubuntu VM template.
-EOF
-      exit 0
-      ;;
-  esac
-done
+    # Create the VM
+    echo "Creating template VM..."
+    qm create "$TEMPLATE_ID" \
+        --name "$TEMPLATE_NAME" \
+        --memory "$MEMORY" \
+        --cores "$CORES" \
+        --net0 virtio,bridge="$BRIDGE"
 
-# Template creation logic here (omitted for brevity, but same as the previously shared script)
+    # Import the disk
+    echo "Importing disk image..."
+    qm importdisk "$TEMPLATE_ID" "$IMAGE_PATH" "$STORAGE"
 
-echo "Template VM created successfully!"
+    # Configure the VM
+    echo "Configuring VM..."
+    qm set "$TEMPLATE_ID" \
+        --scsihw virtio-scsi-pci \
+        --scsi0 "$STORAGE:vm-${TEMPLATE_ID}-disk-0" \
+        --ide2 "$STORAGE:cloudinit" \
+        --boot c --bootdisk scsi0 \
+        --serial0 socket --vga serial0 \
+        --agent enabled=1
+
+    # Convert the VM to a template
+    echo "Converting VM to template..."
+    qm template "$TEMPLATE_ID"
+
+    echo "Template VM created successfully!"
+}
+
+# Main Script Execution
+echo "Starting Proxmox Ubuntu Template Creation..."
+create_template

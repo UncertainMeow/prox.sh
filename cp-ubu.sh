@@ -1,24 +1,17 @@
 #!/bin/bash
 
-# VM Creation Script from Template for Proxmox
+# Proxmox Ubuntu VM Creation Script
+# Creates a VM from a cloud-init template.
 
-# Load environment variables from .env
-if [ -f .env ]; then
-  source .env
-else
-  echo "Error: .env file not found. Please create one with CLOUD_USER and CLOUD_PASSWORD."
-  exit 1
-fi
+set -e
 
-# Verify credentials are loaded
-if [ -z "$CLOUD_USER" ] || [ -z "$CLOUD_PASSWORD" ]; then
-  echo "Error: CLOUD_USER and CLOUD_PASSWORD must be set in .env file."
-  exit 1
-fi
+# Enable logging
+LOG_FILE="/var/log/cp-ubu.log"
+exec > >(tee -i "$LOG_FILE") 2>&1
 
-# Define default variables
+# Default Variables
 TEMPLATE_ID=9000
-NEW_VM_ID=100
+NEW_VMID=100
 VM_NAME="ubuntu-vm"
 STORAGE="local-lvm"
 BRIDGE="vmbr0"
@@ -27,47 +20,98 @@ STATIC_IP=""
 GATEWAY=""
 DNS_SERVERS=""
 
-# Parse arguments
-while getopts "ih?" opt; do
-  case $opt in
-    i)
-      read -p "Enter Template ID [${TEMPLATE_ID}]: " TEMPLATE_ID
-      read -p "Enter New VM ID [${NEW_VM_ID}]: " NEW_VM_ID
-      read -p "Enter VM Name [${VM_NAME}]: " VM_NAME
-      read -p "Enter Storage [${STORAGE}]: " STORAGE
-      read -p "Enter Network Bridge [${BRIDGE}]: " BRIDGE
-      read -p "Use DHCP (true/false) [${USE_DHCP}]: " USE_DHCP
-      if [ "$USE_DHCP" == "false" ]; then
-        read -p "Enter Static IP Address: " STATIC_IP
-        read -p "Enter Gateway: " GATEWAY
-        read -p "Enter DNS Servers (comma-separated): " DNS_SERVERS
-      fi
-      ;;
-    h)
-      echo "Usage: $0 [-i (interactive)] [-h (help)] [-? (man page)]"
-      exit 0
-      ;;
-    ?)
-      cat <<EOF
-NAME
-    cp-ubu.sh - Create a VM from an Ubuntu cloud-init template in Proxmox.
+# Helper Function: Check if a VM ID exists
+vm_exists() {
+    qm list | awk '{print $1}' | grep -q "^$1$"
+}
 
-SYNOPSIS
-    cp-ubu.sh [OPTIONS]
+# Function: Create VM
+create_vm() {
+    # Check if the template VM exists
+    if ! vm_exists "$TEMPLATE_ID"; then
+        echo "Error: Template VM ID $TEMPLATE_ID does not exist."
+        exit 1
+    fi
 
-OPTIONS
-    -i      Interactive mode for setting custom values.
-    -h      Display help message.
-    -?      Display detailed man page.
+    # Check if the new VM ID is already in use
+    if vm_exists "$NEW_VMID"; then
+        echo "Error: VM ID $NEW_VMID already exists. Please choose a different ID."
+        exit 1
+    fi
 
-DESCRIPTION
-    This script clones an Ubuntu cloud-init template and customizes the new VM.
-EOF
-      exit 0
-      ;;
-  esac
-done
+    # Clone the template
+    echo "Cloning template VM..."
+    qm clone "$TEMPLATE_ID" "$NEW_VMID" --name "$VM_NAME" --full
 
-# VM creation logic here (omitted for brevity, but same as the previously shared script)
+    # Configure the VM
+    echo "Configuring VM..."
+    qm set "$NEW_VMID" --net0 virtio,bridge="$BRIDGE"
 
-echo "VM created successfully!"
+    # Handle Networking
+    if [ "$USE_DHCP" = true ]; then
+        echo "Using DHCP for networking."
+        qm set "$NEW_VMID" --ipconfig0 ip=dhcp
+    else
+        # Ensure Static IP, Gateway, and DNS Servers are provided
+        if [ -z "$STATIC_IP" ] || [ -z "$GATEWAY" ]; then
+            echo "Error: Static IP and Gateway are required for static configuration."
+            exit 1
+        fi
+
+        # Use gateway as default DNS if none is provided
+        if [ -z "$DNS_SERVERS" ]; then
+            DNS_SERVERS="$GATEWAY"
+            echo "No DNS servers provided. Defaulting to gateway ($GATEWAY)."
+        fi
+
+        echo "Setting static IP configuration: IP=$STATIC_IP, Gateway=$GATEWAY, DNS=$DNS_SERVERS"
+        qm set "$NEW_VMID" --ipconfig0 ip="$STATIC_IP",gw="$GATEWAY"
+        qm set "$NEW_VMID" --nameserver "$DNS_SERVERS"
+    fi
+
+    # Resize the disk to the configured size
+    qm resize "$NEW_VMID" scsi0 10G
+
+    echo "VM created successfully!"
+}
+
+# Interactive Mode
+interactive_mode() {
+    echo "Enter Template ID [$TEMPLATE_ID]:"
+    read -r input && TEMPLATE_ID=${input:-$TEMPLATE_ID}
+
+    echo "Enter New VM ID [$NEW_VMID]:"
+    read -r input && NEW_VMID=${input:-$NEW_VMID}
+
+    echo "Enter VM Name [$VM_NAME]:"
+    read -r input && VM_NAME=${input:-$VM_NAME}
+
+    echo "Enter Storage [$STORAGE]:"
+    read -r input && STORAGE=${input:-$STORAGE}
+
+    echo "Enter Network Bridge [$BRIDGE]:"
+    read -r input && BRIDGE=${input:-$BRIDGE}
+
+    echo "Use DHCP (true/false) [$USE_DHCP]:"
+    read -r input && USE_DHCP=${input:-$USE_DHCP}
+
+    if [ "$USE_DHCP" = false ]; then
+        echo "Enter Static IP Address:"
+        read -r STATIC_IP
+
+        echo "Enter Gateway:"
+        read -r GATEWAY
+
+        echo "Enter DNS Servers (comma-separated):"
+        read -r input && DNS_SERVERS=${input:-$DNS_SERVERS}
+    fi
+
+    create_vm
+}
+
+# Main Script Execution
+if [[ "$1" == "-i" ]]; then
+    interactive_mode
+else
+    create_vm
+fi
