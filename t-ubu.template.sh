@@ -28,7 +28,7 @@ qm importdisk $VMID ubuntu-template.qcow2 $STORAGE
 qm set $VMID --scsihw virtio-scsi-pci --scsi0 $STORAGE:vm-$VMID-disk-0
 qm set $VMID --ide2 $STORAGE:cloudinit --boot order=scsi0
 qm set $VMID --sshkeys /dev/stdin <<< "$SSH_PUBLIC_KEY"
-qm set $VMID --ciuser "{{CLOUD_USER}}" --cipassword "{{CLOUD_PASSWORD}}"
+qm set $VMID --ciuser "kellen" --cipassword "Jace_1408"
 qm template $VMID
 
 echo "Template creation completed successfully."
