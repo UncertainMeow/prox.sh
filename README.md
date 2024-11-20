@@ -1,47 +1,57 @@
-Proxmox Ubuntu Automation Scripts
-Overview
+# Proxmox Ubuntu Automation Scripts
+
+## Overview
 This repository contains two scripts to simplify the creation of Ubuntu cloud-init templates and virtual machines (VMs) in a Proxmox environment. It is designed to be user-friendly while providing robust customization options.
 
-Scripts
-1. Template Creation Script (t-ubu.sh)
-Automates the creation of a reusable Ubuntu cloud-init template on Proxmox.
-Features:
-Supports interactive or default parameter modes.
-Downloads and configures the latest Ubuntu LTS cloud-init image.
-Installs essential tools (e.g., qemu-guest-agent).
-2. VM Creation Script (cp-ubu.sh)
-Automates creating VMs from the Ubuntu cloud-init template.
-Features:
-Supports DHCP and static IP network configuration.
-Customizable VM resources (memory, disk size, etc.).
-Automatically resizes and provisions the VM disk.
-Setup
-Prerequisites
-Proxmox VE:
+---
 
-Installed and configured with sufficient storage and network setup.
-Required Tools:
+## Scripts
 
-Ensure these tools are installed on your Proxmox host:
-bash
-Copy code
-apt install -y wget qemu-guest-agent
-Environment Variables File (.env):
+### 1. **Template Creation Script (`t-ubu.sh`)**
+- Automates the creation of a reusable Ubuntu cloud-init template on Proxmox.
+- **Features**:
+  - Supports interactive or default parameter modes.
+  - Downloads and configures the latest Ubuntu LTS cloud-init image.
+  - Installs essential tools (e.g., `qemu-guest-agent`).
 
-Create a .env file in the repository root with the following content:
-plaintext
-Copy code
-CLOUD_USER=<your-cloud-user>
-CLOUD_PASSWORD=<your-cloud-password>
-Replace <your-cloud-user> and <your-cloud-password> with your actual credentials.
-Ensure this file is never tracked by Git (already excluded via .gitignore).
-Installation
-Clone the repository:
+### 2. **VM Creation Script (`cp-ubu.sh`)**
+- Automates creating VMs from the Ubuntu cloud-init template.
+- **Features**:
+  - Supports DHCP and static IP network configuration.
+  - Customizable VM resources (memory, disk size, etc.).
+  - Automatically resizes and provisions the VM disk.
 
-bash
-Copy code
-git clone https://github.com/YourUsername/prox.sh.git
-cd prox.sh
+---
+
+## Setup
+
+### Prerequisites
+1. **Proxmox VE**:
+   - Installed and configured with sufficient storage and network setup.
+
+2. **Required Tools**:
+   - Ensure these tools are installed on your Proxmox host:
+     ```bash
+     apt install -y wget qemu-guest-agent
+     ```
+
+3. **Environment Variables File (`.env`)**:
+   - Create a `.env` file in the repository root with the following content:
+     ```
+     CLOUD_USER=<your-cloud-user>
+     CLOUD_PASSWORD=<your-cloud-password>
+     ```
+   - Replace `<your-cloud-user>` and `<your-cloud-password>` with your actual credentials.
+   - Ensure this file is **never tracked by Git** (already excluded via `.gitignore`).
+
+---
+
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/YourUsername/prox.sh.git
+   cd prox.sh
 Add your .env file:
 
 bash
