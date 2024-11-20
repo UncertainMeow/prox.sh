@@ -27,7 +27,7 @@ cd repo-name
 Create the .env file:
 bash
 Copy code
-echo -e "CLOUD_USER=kellen\nCLOUD_PASSWORD=Prox_1408" > .env
+echo -e "CLOUD_USER=user\nCLOUD_PASSWORD=password" > .env
 Usage
 Script 1: Template Creation (t-ubu.sh)
 Default: Run the script with all defaults:
