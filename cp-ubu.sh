@@ -4,19 +4,29 @@
 
 set -e
 
+# Ensure necessary dependencies are installed
+if ! command -v cloud-localds &> /dev/null; then
+  echo "Installing 'cloud-image-utils' package..."
+  apt-get update
+  apt-get install -y cloud-image-utils
+fi
+
 # Load credentials from .env file
 if [ -f .env ]; then
   source .env
 else
-  echo "Error: .env file not found. Please create one with CLOUD_USER, CLOUD_PASSWORD, and SSH_PUBLIC_KEY."
+  echo "Error: .env file not found. Please create one with CLOUD_USER and CLOUD_PASSWORD."
   exit 1
 fi
+
+# Hardcoded SSH public key
+SSH_PUBLIC_KEY='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMkRa/QcyXAbA...'
 
 # Default variables
 TEMPLATE_ID=9000
 VMID=100
 VM_NAME="ubuntu-vm"
-STORAGE="local-lvm"  # Storage is now set to 'local-lvm'
+STORAGE="local-lvm"
 BRIDGE="vmbr0"
 MEMORY=2048
 CORES=2
@@ -44,7 +54,7 @@ SYNOPSIS
     ./cp-ubu.sh [OPTIONS]
 
 DESCRIPTION
-    This script automates the creation of a new Ubuntu VM from an existing cloud-init template in Proxmox VE.
+    This script automates the creation of a new Ubuntu VM from an existing cloud-init template in Proxmox VE, including a custom cloud-init configuration to reduce network wait time during boot.
 
 OPTIONS
     -i
@@ -64,7 +74,7 @@ EXAMPLES
         Run the script in interactive mode.
 
 AUTHOR
-    Provided by [Your Name].
+    Provided by Your Name.
 
 EOF
 }
@@ -95,7 +105,8 @@ while getopts "ih?" opt; do
         USE_DHCP=false
         read -p "Enter Static IP Address (e.g., 192.168.1.100/24): " IP_ADDRESS
         read -p "Enter Gateway IP Address: " GATEWAY
-        read -p "Enter DNS Servers (space-separated): " DNS_SERVERS
+        read -p "Enter DNS Servers (space-separated) [${DNS_SERVERS}]: " dns_input
+        DNS_SERVERS=${dns_input:-$DNS_SERVERS}
       else
         USE_DHCP=true
       fi
@@ -134,18 +145,71 @@ fi
 qm clone ${TEMPLATE_ID} ${VMID} --name "${VM_NAME}"
 
 # Set VM parameters
-qm set ${VMID} --memory ${MEMORY} --cores ${CORES} --net0 virtio,bridge=${BRIDGE}
+qm set ${VMID} \
+  --memory ${MEMORY} \
+  --cores ${CORES} \
+  --net0 virtio,bridge=${BRIDGE}
 
 # Configure cloud-init network settings
 if [ "$USE_DHCP" = true ]; then
-  qm set ${VMID} --ipconfig0 ip=dhcp
+  qm set ${VMID} \
+    --ipconfig0 ip=dhcp
 else
-  qm set ${VMID} --ipconfig0 ip=${IP_ADDRESS},gw=${GATEWAY}
-  qm set ${VMID} --nameserver "${DNS_SERVERS}"
+  qm set ${VMID} \
+    --ipconfig0 ip=${IP_ADDRESS},gw=${GATEWAY} \
+    --nameserver "${DNS_SERVERS}"
 fi
+
+# Generate custom cloud-init ISO to reduce network wait time and include user configuration
+
+# Create user-data file with variable substitution
+cat > user-data <<EOF
+#cloud-config
+bootcmd:
+  - echo "Reducing network configuration wait time to 30 seconds"
+  - sed -i 's/TimeoutStartSec=5min/TimeoutStartSec=30sec/' /lib/systemd/system/networking.service
+
+users:
+  - name: ${CLOUD_USER}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    shell: /bin/bash
+    lock_passwd: false
+    ssh_authorized_keys:
+      - ${SSH_PUBLIC_KEY}
+
+chpasswd:
+  list: |
+    ${CLOUD_USER}:${CLOUD_PASSWORD}
+  expire: False
+
+ssh_pwauth: True
+EOF
+
+# Create meta-data file
+cat > meta-data <<EOF
+instance-id: ${VMID}
+local-hostname: ${VM_NAME}
+EOF
+
+# Create custom cloud-init ISO
+CLOUDINIT_ISO="custom-cloudinit-${VMID}.iso"
+cloud-localds ${CLOUDINIT_ISO} user-data meta-data
+
+# Upload the ISO to Proxmox storage
+ISO_PATH="/var/lib/vz/template/iso/${CLOUDINIT_ISO}"
+mv ${CLOUDINIT_ISO} ${ISO_PATH}
+
+# Attach the custom cloud-init ISO
+qm set ${VMID} --ide2 local:iso/${CLOUDINIT_ISO},media=cdrom
+
+# Set boot order to boot from the cloud-init ISO first and then the main disk
+qm set ${VMID} --boot "order=ide2;scsi0"
+
+# Clean up temporary files
+rm -f user-data meta-data
 
 # Start the VM
 qm start ${VMID}
 
 echo "VM ${VM_NAME} (ID: ${VMID}) created and started successfully!"
-
